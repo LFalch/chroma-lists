@@ -16,7 +16,7 @@ if x = 0, y = 0, and "..." is entirely composed of zeros:
 */
 
 #[derive(Debug, Clone)]
-pub struct ChromaList(Vec<u16>, Option<Box<ChromaList>>);
+pub struct ChromaList(Vec<Vec<u16>>);
 
 impl FromStr for ChromaList {
     type Err = ();
@@ -27,13 +27,14 @@ impl FromStr for ChromaList {
             let index = s[1..].find('[');
             if let Some(i) = index {
                 let list: Vec<_> = s[1..i].split(' ').map(|s| s.trim().parse::<u16>().unwrap()).collect();
-                Ok(ChromaList(list, Some(Box::new(ChromaList::from_str(&s[i+1..s.len()-1])?))))
+                let mut list = vec![list];
+                list.append(&mut ChromaList::from_str(&s[i+1..s.len()-1])?.0);
+                Ok(ChromaList(list))
             } else {
-                Ok(ChromaList(s[1..s.len()-1]
+                Ok(ChromaList(vec![s[1..s.len()-1]
                     .split(' ')
                     .map(|s| s.trim().parse::<u16>().unwrap())
-                    .collect(),
-                None))
+                    .collect()]))
             }
         }
     }
@@ -41,18 +42,20 @@ impl FromStr for ChromaList {
 
 impl Display for ChromaList {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "[")?;
-        let last_elem = self.0.len() - 1;
-        for (i, n) in self.0.iter().enumerate() {
-            write!(f, "{}", n)?;
-            if self.1.is_some() || i != last_elem {
-                write!(f, ", ")?;
+        let last_list = self.0.len() - 1;
+
+        for (j, list) in self.0.iter().enumerate() {
+            let last_elem = list.len() - 1;
+            write!(f, "[")?;
+
+            for (i, n) in list.iter().enumerate() {
+                write!(f, "{}", n)?;
+                if j != last_list || i != last_elem {
+                    write!(f, " ")?;
+                }
             }
         }
-        if let Some(ref nest) = self.1 {
-            nest.fmt(f)?;
-        }
-        write!(f, "]")
+        write!(f, "{}", "]".repeat(self.0.len()))
     }
 }
 
@@ -65,7 +68,7 @@ impl Iterator for ChromaList {
         }
         let ret = self.clone();
 
-        *self = std::mem::replace(self, ChromaList(vec![], None)).next_mutation();
+        self.next_mutation();
 
         Some(ret)
     }
@@ -73,48 +76,45 @@ impl Iterator for ChromaList {
 
 impl ChromaList {
     pub fn len(&self) -> usize {
-        self.0.len() + self.1.as_ref().map(|l| l.len()).unwrap_or(0)
+        self.0.iter().map(|l| l.len()).sum()
     }
 
-    pub fn next_mutation(self) -> Self {
-        let ChromaList(ns, nested_list) = self;
+    pub fn next_mutation(&mut self) {
+        let ChromaList(ref mut lists) = *self;
 
-        if ns.is_empty() {
-            if let Some(new_list) = nested_list {
-                return *new_list;
-            } else {
-                unreachable!()
-            }
+        if lists.last().unwrap().is_empty() {
+            lists.pop();
         }
 
-        match nested_list {
-            Some(nested_list) => {
-                if nested_list.1.is_none() && (nested_list.0.len() == 1 || nested_list.0.iter().sum::<u16>() == 0) {
-                    let mut ns = ns;
-                    ns.push(nested_list.0[0]);
-                    ChromaList(ns, None)
-                } else {
-                    ChromaList(ns, Some(Box::new(nested_list.next_mutation())))
-                }
-            }
-            None => {
-                let mut ns = ns;
+        if lists.last().unwrap().iter().cloned().sum::<u16>() == 0 {
+            lists.pop();
 
-                let x = *ns.first().unwrap();
-                let y = ns.pop().unwrap();
-
-                if y > 0 {
-                    let mut nested_list = ns.clone();
-                    nested_list.push(y-1);
-                    ChromaList(ns, Some(Box::new(ChromaList(nested_list, None))))
-                } else if x > 0 {
-                    *ns.first_mut().unwrap() -= 1;
-                    ns.push(1);
-                    ChromaList(ns, None)
-                } else {
-                    ChromaList(ns, None)
-                }
+            if let Some(last_mut) = lists.last_mut() {
+                last_mut.push(0);
             }
+
+            return
+        }
+
+        let (x, y);
+
+        {
+            let last = lists.last_mut().unwrap();
+
+            x = *last.first().unwrap();
+            y = last.pop().unwrap();
+        }
+
+        if y > 0 {
+            let mut nested_list = lists.last().unwrap().clone();
+            nested_list.push(y-1);
+
+            lists.push(nested_list);
+        } else if x > 0 {
+            let last = lists.last_mut().unwrap();
+
+            *last.first_mut().unwrap() -= 1;
+            last.push(1);
         }
     }
 }
